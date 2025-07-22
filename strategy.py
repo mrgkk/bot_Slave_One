@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import MetaTrader5 as mt5
 # Use absolute import for better compatibility when importing from outside the package
-from bot_lite.mt5_manager import MT5ConnectionManager
+from mt5_manager import MT5ConnectionManager
 from datetime import datetime, timedelta, timezone
 import pytz
 import json
@@ -66,10 +66,10 @@ class UnicodeStreamHandler(logging.StreamHandler):
             self.handleError(record)
 
 # Import config manager
-from bot_lite.config_manager import get_config
+from config_manager import get_config
 
 # Import trade logger
-from bot_lite.trade_logger import trade_logger
+from trade_logger import trade_logger
 
 # Get config instance
 config = get_config()
@@ -529,10 +529,10 @@ class XAUUSDStrategy:
     def _init_config(self):
         """Initialize configuration from file or defaults"""
         if self._config_path:
-            from bot_lite.config_manager import ConfigManager
+            from config_manager import ConfigManager
             self._config = ConfigManager(self._config_path)
         else:
-            from bot_lite.config_manager import get_config
+            from config_manager import get_config
             self._config = get_config()
 
     def init_timezones(self):
@@ -663,7 +663,7 @@ class XAUUSDStrategy:
         # Trading style parameters
         self._atr_swing_threshold = 1.30  # ATR threshold for swing vs scalp trading style
         self._current_trading_style = 'scalp'  # Default trading style
-        self._config_trading_style = self._get_param('trading_style', str, 'both')  # Config-defined trading style: 'scalp', 'swing', or 'both'
+        # self._config_trading_style = self._get_param('trading_style', str, 'both')  # Config-defined trading style: 'scalp', 'swing', or 'both'
 
         # SuperTrend parameters with defaults
         self._st_long_period = self._get_param('st_long_period', int)
@@ -1530,7 +1530,7 @@ class XAUUSDStrategy:
 
         if use_db:
             try:
-                from bot_lite.mt5_data_loader import MT5DataLoader
+                from create_ohlc_table_load_data import MT5DataLoader
                 loader = MT5DataLoader()
                 df = loader.load_from_database(from_date=load_from_date, to_date=load_to_date)                
                 if df is None or df.empty:
@@ -2758,6 +2758,88 @@ class XAUUSDStrategy:
             # Default to backtesting mode (safer - won't hit ForexFactory)
             return True
 
+    # def _get_forexfactory_news_old(self, date):
+    #     """
+    #     Fetch news events from ForexFactory for a specific date.
+
+    #     Args:
+    #         date: datetime.date object
+
+    #     Returns:
+    #         list: List of news events for the date
+    #     """
+    #     date_str = date.strftime('%Y-%m-%d')
+
+    #     # Check cache first
+    #     if date_str in self._ff_news_cache:
+    #         cache_time, data = self._ff_news_cache[date_str]
+    #         if time.time() - cache_time < self._ff_cache_expiry:
+    #             return data
+
+    #     try:
+    #         # ForexFactory calendar URL
+    #         url = f"https://www.forexfactory.com/calendar?day={date.strftime('%b%d.%Y')}"
+
+    #         headers = {
+    #             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    #         }
+
+    #         response = requests.get(url, headers=headers, timeout=10)
+    #         response.raise_for_status()
+
+    #         soup = BeautifulSoup(response.content, 'html.parser')
+
+    #         # Parse news events
+    #         news_events = []
+    #         calendar_rows = soup.find_all('tr', class_='calendar_row')
+
+    #         for row in calendar_rows:
+    #             try:
+    #                 # Extract time
+    #                 time_cell = row.find('td', class_='calendar__time')
+    #                 if not time_cell:
+    #                     continue
+
+    #                 event_time = time_cell.get_text(strip=True)
+    #                 if not event_time or event_time in ['Day', 'All Day']:
+    #                     continue
+
+    #                 # Extract currency
+    #                 currency_cell = row.find('td', class_='calendar__currency')
+    #                 currency = currency_cell.get_text(strip=True) if currency_cell else ''
+
+    #                 # Extract impact
+    #                 impact_cell = row.find('td', class_='calendar__impact')
+    #                 impact_spans = impact_cell.find_all('span', class_='calendar__impact-icon') if impact_cell else []
+    #                 impact_level = len([span for span in impact_spans if 'calendar__impact-icon--screen' in span.get('class', [])])
+
+    #                 # Extract event title
+    #                 event_cell = row.find('td', class_='calendar__event')
+    #                 event_title = event_cell.get_text(strip=True) if event_cell else ''
+
+    #                 # Only include high impact events (3 red bars) for major currencies
+    #                 if impact_level >= 3 and currency in ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD']:
+    #                     news_events.append({
+    #                         'time': event_time,
+    #                         'currency': currency,
+    #                         'impact': impact_level,
+    #                         'title': event_title
+    #                     })
+
+    #             except Exception as e:
+    #                 logger.debug(f"Error parsing news row: {e}")
+    #                 continue
+
+    #         # Cache the results
+    #         self._ff_news_cache[date_str] = (time.time(), news_events)
+
+    #         logger.debug(f"Fetched {len(news_events)} high-impact news events for {date_str}")
+    #         return news_events
+
+    #     except Exception as e:
+    #         logger.warning(f"Failed to fetch ForexFactory news for {date_str}: {e}")
+    #         return []
+
     def _get_forexfactory_news(self, date):
         """
         Fetch news events from ForexFactory for a specific date.
@@ -2766,8 +2848,14 @@ class XAUUSDStrategy:
             date: datetime.date object
 
         Returns:
-            list: List of news events for the date
+            list: List of high-impact news events for the date
         """
+        import requests
+        from bs4 import BeautifulSoup
+        import time
+        import logging
+
+        logger = logging.getLogger(__name__)
         date_str = date.strftime('%Y-%m-%d')
 
         # Check cache first
@@ -2777,47 +2865,52 @@ class XAUUSDStrategy:
                 return data
 
         try:
-            # ForexFactory calendar URL
             url = f"https://www.forexfactory.com/calendar?day={date.strftime('%b%d.%Y')}"
 
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/115.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.google.com",
+                "Connection": "keep-alive"
             }
 
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.content, 'html.parser')
-
-            # Parse news events
             news_events = []
             calendar_rows = soup.find_all('tr', class_='calendar_row')
 
             for row in calendar_rows:
                 try:
-                    # Extract time
+                    # Time
                     time_cell = row.find('td', class_='calendar__time')
-                    if not time_cell:
-                        continue
-
-                    event_time = time_cell.get_text(strip=True)
+                    event_time = time_cell.get_text(strip=True) if time_cell else ''
                     if not event_time or event_time in ['Day', 'All Day']:
                         continue
 
-                    # Extract currency
+                    # Currency
                     currency_cell = row.find('td', class_='calendar__currency')
                     currency = currency_cell.get_text(strip=True) if currency_cell else ''
 
-                    # Extract impact
+                    # Impact
                     impact_cell = row.find('td', class_='calendar__impact')
-                    impact_spans = impact_cell.find_all('span', class_='calendar__impact-icon') if impact_cell else []
-                    impact_level = len([span for span in impact_spans if 'calendar__impact-icon--screen' in span.get('class', [])])
+                    impact_icons = impact_cell.find_all('span', class_='calendar__impact-icon') if impact_cell else []
+                    impact_level = len([
+                        icon for icon in impact_icons
+                        if 'calendar__impact-icon--screen' in icon.get('class', [])
+                    ])
 
-                    # Extract event title
+                    # Event title
                     event_cell = row.find('td', class_='calendar__event')
                     event_title = event_cell.get_text(strip=True) if event_cell else ''
 
-                    # Only include high impact events (3 red bars) for major currencies
+                    # Only keep high-impact events for major currencies
                     if impact_level >= 3 and currency in ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD']:
                         news_events.append({
                             'time': event_time,
@@ -2830,15 +2923,78 @@ class XAUUSDStrategy:
                     logger.debug(f"Error parsing news row: {e}")
                     continue
 
-            # Cache the results
+            # Cache results
             self._ff_news_cache[date_str] = (time.time(), news_events)
-
             logger.debug(f"Fetched {len(news_events)} high-impact news events for {date_str}")
             return news_events
 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             logger.warning(f"Failed to fetch ForexFactory news for {date_str}: {e}")
             return []
+
+
+    # def _get_forexfactory_holidays_old(self, date):
+    #     """
+    #     Check if date is a market holiday according to ForexFactory.
+
+    #     Args:
+    #         date: datetime.date object
+
+    #     Returns:
+    #         bool: True if it's a holiday, False otherwise
+    #     """
+    #     date_str = date.strftime('%Y-%m-%d')
+
+    #     # Check cache first
+    #     if date_str in self._ff_holidays_cache:
+    #         cache_time, is_holiday = self._ff_holidays_cache[date_str]
+    #         if time.time() - cache_time < self._ff_cache_expiry:
+    #             return is_holiday
+
+    #     try:
+    #         # Check if it's a weekend first
+    #         if date.weekday() >= 5:  # Saturday (5) or Sunday (6)
+    #             self._ff_holidays_cache[date_str] = (time.time(), True)
+    #             return True
+
+    #         # ForexFactory calendar URL for the specific date
+    #         url = f"https://www.forexfactory.com/calendar?day={date.strftime('%b%d.%Y')}"
+
+    #         headers = {
+    #             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    #         }
+
+    #         response = requests.get(url, headers=headers, timeout=10)
+    #         response.raise_for_status()
+
+    #         soup = BeautifulSoup(response.content, 'html.parser')
+
+    #         # Look for holiday indicators
+    #         holiday_indicators = [
+    #             'holiday', 'bank holiday', 'market closed', 'no trading',
+    #             'christmas', 'new year', 'thanksgiving', 'independence day'
+    #         ]
+
+    #         page_text = soup.get_text().lower()
+    #         is_holiday = any(indicator in page_text for indicator in holiday_indicators)
+
+    #         # Also check for very few or no events (might indicate holiday)
+    #         calendar_rows = soup.find_all('tr', class_='calendar_row')
+    #         if len(calendar_rows) < 3:  # Very few events might indicate holiday
+    #             is_holiday = True
+
+    #         # Cache the result
+    #         self._ff_holidays_cache[date_str] = (time.time(), is_holiday)
+
+    #         if is_holiday:
+    #             logger.debug(f"Holiday detected for {date_str}")
+
+    #         return is_holiday
+
+    #     except Exception as e:
+    #         logger.warning(f"Failed to check ForexFactory holidays for {date_str}: {e}")
+    #         # Fallback to basic weekend check
+    #         return date.weekday() >= 5
 
     def _get_forexfactory_holidays(self, date):
         """
@@ -2850,58 +3006,74 @@ class XAUUSDStrategy:
         Returns:
             bool: True if it's a holiday, False otherwise
         """
+        import requests
+        from bs4 import BeautifulSoup
+        import time
+        import logging
+
+        logger = logging.getLogger(__name__)
         date_str = date.strftime('%Y-%m-%d')
 
-        # Check cache first
+        # Check cache
         if date_str in self._ff_holidays_cache:
             cache_time, is_holiday = self._ff_holidays_cache[date_str]
             if time.time() - cache_time < self._ff_cache_expiry:
                 return is_holiday
 
+        # Weekends are always holidays
+        if date.weekday() >= 5:
+            self._ff_holidays_cache[date_str] = (time.time(), True)
+            return True
+
+        url = f"https://www.forexfactory.com/calendar?day={date.strftime('%b%d.%Y')}"
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/115.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.google.com",
+            "Connection": "keep-alive"
+        }
+
         try:
-            # Check if it's a weekend first
-            if date.weekday() >= 5:  # Saturday (5) or Sunday (6)
-                self._ff_holidays_cache[date_str] = (time.time(), True)
-                return True
-
-            # ForexFactory calendar URL for the specific date
-            url = f"https://www.forexfactory.com/calendar?day={date.strftime('%b%d.%Y')}"
-
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.content, 'html.parser')
 
-            # Look for holiday indicators
-            holiday_indicators = [
+            page_text = soup.get_text().lower()
+            holiday_keywords = [
                 'holiday', 'bank holiday', 'market closed', 'no trading',
                 'christmas', 'new year', 'thanksgiving', 'independence day'
             ]
 
-            page_text = soup.get_text().lower()
-            is_holiday = any(indicator in page_text for indicator in holiday_indicators)
+            is_holiday = any(word in page_text for word in holiday_keywords)
 
-            # Also check for very few or no events (might indicate holiday)
-            calendar_rows = soup.find_all('tr', class_='calendar_row')
-            if len(calendar_rows) < 3:  # Very few events might indicate holiday
+            # If no or very few events are listed, might also indicate a holiday
+            events = soup.find_all('tr', class_='calendar_row')
+            if len(events) < 3:
                 is_holiday = True
 
-            # Cache the result
             self._ff_holidays_cache[date_str] = (time.time(), is_holiday)
-
             if is_holiday:
                 logger.debug(f"Holiday detected for {date_str}")
-
             return is_holiday
 
-        except Exception as e:
+        except requests.exceptions.HTTPError as e:
             logger.warning(f"Failed to check ForexFactory holidays for {date_str}: {e}")
-            # Fallback to basic weekend check
-            return date.weekday() >= 5
+            # Optional: Treat request failure as non-holiday, or fallback to a different method
+            self._ff_holidays_cache[date_str] = (time.time(), False)
+            return False
+
+        except Exception as e:
+            logger.exception(f"Unexpected error checking ForexFactory holidays for {date_str}")
+            self._ff_holidays_cache[date_str] = (time.time(), False)
+            return False
+
 
     def _is_bank_holiday(self, current_date):
         """
@@ -3643,17 +3815,17 @@ class XAUUSDStrategy:
         #     self._pending_signal_timestamp = None
 
         # Determine current trading style based on ATR
-        #trading_style = self._determine_trading_style(current_bar)
+        trading_style = self._determine_trading_style(current_bar)
         
-        # Get the trading style based on ATR
-        dynamic_trading_style = self._determine_trading_style(current_bar)
-        print("dynamic_trading_style value:", dynamic_trading_style)
-        print("self._config_trading_style value:", self._config_trading_style)
-        # Check if the configured trading style allows this dynamic style
-        should_run_scalp = (self._config_trading_style == 'scalp' or self._config_trading_style == 'both') and dynamic_trading_style == 'scalp'
-        should_run_swing = (self._config_trading_style == 'swing' or self._config_trading_style == 'both') and dynamic_trading_style == 'swing'
-        print("should_run_scalp value:", should_run_scalp)
-        print("should_run_swing value:", should_run_swing)
+        # # Get the trading style based on ATR
+        # dynamic_trading_style = self._determine_trading_style(current_bar)
+        # #print("dynamic_trading_style value:", dynamic_trading_style)
+        # #print("self._config_trading_style value:", self._config_trading_style)
+        # # Check if the configured trading style allows this dynamic style
+        # should_run_scalp = (self._config_trading_style == 'scalp' or self._config_trading_style == 'both') and dynamic_trading_style == 'scalp'
+        # should_run_swing = (self._config_trading_style == 'swing' or self._config_trading_style == 'both') and dynamic_trading_style == 'swing'
+        # #print("should_run_scalp value:", should_run_scalp)
+        # #print("should_run_swing value:", should_run_swing)
         # Check required indicators
         required_indicators = [
             'st_long', 'st_long_direction', 'st_short', 'st_short_direction',
@@ -3727,8 +3899,8 @@ class XAUUSDStrategy:
         long_entry_condition = False
         short_entry_condition = False
 
-        #if trading_style == 'scalp':
-        if should_run_scalp:    
+        if trading_style == 'scalp':
+        #if should_run_scalp:    
             logger.debug(f"Running scalp trading logic for bar at {current_bar.name}")
             #logger.info(f"[{timestamp}] 🔍 Waiting for candle to touch ST_Short level: {current_bar['st_short']:.2f}")
 
@@ -3762,8 +3934,8 @@ class XAUUSDStrategy:
             long_entry_condition = st_touch_long and rsi_condition_long and adx_condition_long
             short_entry_condition = st_touch_short and rsi_condition_short and adx_condition_short
             
-        #if trading_style == 'swing':
-        if should_run_swing:
+        if trading_style == 'swing':
+        #if should_run_swing:
             logger.debug(f"Running swing trading logic for bar at {current_bar.name}")
             # Check if this is the first candle after ST direction change
             st_long_direction_changed = prev_bar is not None and current_bar['st_long_direction'] != prev_bar['st_long_direction']
@@ -5405,6 +5577,11 @@ class XAUUSDStrategy:
         atr = current_bar.get('atr', 0.0)
         supertrend = current_bar.get('super_trend', {})
 
+        current_close = current_bar['Close']
+        current_low = current_bar['Low']
+        current_high = current_bar['High']
+        
+
         # Process all open positions tracked by magic number
         # Create a copy to avoid "dictionary changed size during iteration" error
         open_positions_copy = self._open_positions.copy()
@@ -5485,13 +5662,13 @@ class XAUUSDStrategy:
                             logger.debug(f"   ❌ LONG exit condition NOT met: Prev Close ({prev_bar['Close']:.2f}) >= ST_Long ({st_long_val})")
                 else:
                     logger.debug(f"🔍 SuperTrend Exit Check for Magic {magic_number}: No previous bar data available")
-                    exit_conditions.append({
-                        'type': 'SuperTrend Exit',
-                        'condition': "No previous bar data available",
-                        'status': 'UNKNOWN',
-                        'exit_price': None,
-                        'reason': None
-                    })
+                    # exit_conditions.append({
+                    #     'type': 'SuperTrend Exit',
+                    #     'condition': "No previous bar data available",
+                    #     'status': 'UNKNOWN',
+                    #     'exit_price': None,
+                    #     'reason': None
+                    # })
 
             # Enhanced debugging for all exit conditions
             if exit_reason:
@@ -5859,14 +6036,19 @@ class XAUUSDStrategy:
         else:  # SHORT
             stop_loss = entry_price + (atr_value * stop_multiplier)
             take_profit = entry_price - (atr_value * tp_multiplier)
-                
+
+        # Determine risk percentage based on trading style
+        trading_style = self._determine_trading_style(current_bar)
+
         # Determine risk percentage based on trading style
         original_risk_pct = self.risk_per_trade_pct
-        if hasattr(self, '_current_trading_style') and self._current_trading_style == 'swing':
+        #if hasattr(self, '_current_trading_style') and self._current_trading_style == 'swing':
+        if trading_style == 'swing':
             # For swing style, use the configured swing risk percentage
             risk_pct = self.swing_risk_per_trade_pct
             logger.info(f"Using swing style risk: {risk_pct}% (increased from {original_risk_pct}%) [from config]")
-        else:
+        #else
+        if trading_style == 'scalp':            
             # For scalp style, use the default risk per trade
             risk_pct = original_risk_pct
             logger.info(f"Using scalp style risk: {risk_pct}%")
@@ -7279,7 +7461,6 @@ class XAUUSDStrategy:
                             # Show trade details before exit check
                             logger.info(f"  🔍 Trade {trade.magic_number} ({trade.direction.name}): Entry:{trade.entry_price:.2f} SL:{trade.stop_loss:.2f} TP:{trade.take_profit:.2f}")
                             
-
                             # Show detailed exit condition analysis for this trade
                             exit_conditions = self._check_position_exit_conditions(trade, current_bar, prev_bar)
                             

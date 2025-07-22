@@ -9,7 +9,7 @@ import os
 from datetime import datetime, timezone
 import pytz
 from typing import Optional, Dict, Any
-from bot_lite.config_manager import get_config
+from config_manager import get_config
 
 class TradeLogger:
     """Utility class for logging trades to the database."""
