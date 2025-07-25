@@ -516,6 +516,10 @@ class XAUUSDStrategy:
             else:
                 logger.info("Successfully connected to MT5")
                 
+                # Enable Auto Trading
+                if not self._mt5_manager.check_auto_trading_enabled():
+                    logger.warning("Please enable AutoTrading in MetaTrader before proceeding.")
+
                 # Now that MT5 is connected, we can detect the server timezone if needed
                 if self._auto_detect_server_timezone and self._server_timezone is None:
                     logger.info("MT5 connected, now detecting server timezone...")

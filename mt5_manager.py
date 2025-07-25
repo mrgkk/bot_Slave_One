@@ -1,3 +1,4 @@
+import os
 import MetaTrader5 as mt5
 import pandas as pd
 import time
@@ -97,13 +98,17 @@ class MT5ConnectionManager:
                         timeout=int(mt5_config.get('timeout', '60000')),
                         login=int(mt5_config.get('login', 0)),
                         password=mt5_config.get('password', ''),
-                        server=mt5_config.get('server', '')
+                        server=mt5_config.get('server', ''),
+                        command_line=mt5_config.get('command_line','')
                     )
                 else:
                     mt5.initialize()
                 
                 # Verify connection
                 if self.check_connection():
+                    if not self.validate_terminal_instance():
+                        mt5.shutdown()
+                        continue  # Try the next attempt
                     logger.info("✅ MT5 connection established successfully")
                     return True
                     
@@ -276,3 +281,51 @@ class MT5ConnectionManager:
                 logger.info("MT5 connection terminated")
         except Exception as e:
             logger.error(f"Error shutting down MT5: {e}")
+
+    def check_auto_trading_enabled(self) -> bool:
+        """
+        Checks if auto trading is enabled in the MT5 terminal.
+        
+        Returns:
+            bool: True if auto trading is enabled, False otherwise
+        """
+        try:
+            terminal_info = mt5.terminal_info()
+            if terminal_info is None:
+                logger.error("Unable to retrieve terminal info.")
+                return False
+            
+            if not terminal_info.trade_allowed:
+                logger.warning("⚠️ Auto trading is currently DISABLED in the terminal. "
+                               "Please enable it manually in MetaTrader.")
+                return False
+            
+            logger.info("✅ Auto trading is enabled in the terminal.")
+            return True
+        except Exception as e:
+            logger.error(f"Error checking auto trading status: {e}")
+            return False
+
+    def validate_terminal_instance(self) -> bool:
+        try:
+            mt5_config = self.config.get_section('MT5')
+            expected_exe_path = mt5_config.get('executable_path', '')
+            expected_dir = os.path.dirname(os.path.normpath(expected_exe_path)).lower()
+
+            terminal_info = mt5.terminal_info()
+            if terminal_info is None:
+                logger.error("Unable to retrieve terminal info.")
+                return False
+
+            connected_dir = os.path.normpath(terminal_info.path).lower()
+
+            if expected_dir != connected_dir:
+                logger.error(f"⚠️ Connected to unexpected MT5 instance at: {connected_dir}")
+                return False
+
+            logger.info(f"✅ Connected to correct MT5 instance at: {connected_dir}")
+            return True
+        except Exception as e:
+            logger.error(f"Error validating terminal instance: {e}")
+            return False
+
