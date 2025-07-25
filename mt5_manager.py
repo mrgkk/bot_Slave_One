@@ -122,29 +122,30 @@ class MT5ConnectionManager:
         return False
 
     def ensure_connected(self) -> bool:
-        """
-        Ensure MT5 terminal is connected and authorized.
-        Performs periodic connection checks and automatic reconnection if needed.
-        
-        Returns:
-            bool: True if connected, False otherwise
-        """
-        current_time = time.time()
-        
-        # Check if we need to verify the connection
-        if (self._mt5_initialized and 
-            current_time - self._last_connection_check < self._connection_check_interval):
+        if self._mt5_initialized and time.time() - self._last_connection_check < self._connection_check_interval:
             return True
-            
-        self._last_connection_check = current_time
-        
-        # Check if already connected
+
+        self._last_connection_check = time.time()
+
         if self.check_connection():
+            if not self.validate_terminal_instance():
+                logger.error("MT5 reconnected to the wrong instance — shutting down.")
+                mt5.shutdown()
+                return False
             return True
-            
-        # Try to reconnect
+
         logger.warning("MT5 connection lost. Attempting to reconnect...")
-        return self.initialize()
+        mt5.shutdown()
+
+        if self.initialize():
+            if not self.validate_terminal_instance():
+                logger.error("Reconnected to wrong instance. Aborting.")
+                mt5.shutdown()
+                return False
+            return True
+
+        return False
+
     
     def select_symbol(self, symbol: str) -> bool:
         """
